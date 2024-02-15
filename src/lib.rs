@@ -78,10 +78,14 @@
 #![cfg_attr(not(test), no_std)]
 
 mod read;
-pub use read::{Delay, DhtError, InputOutputPin};
+pub use read::{DhtError, InputOutputPin};
 
 #[cfg(feature = "async")]
-use embedded_hal_async::delay::DelayUs;
+use embassy_rp::gpio::AnyPin;
+#[cfg(feature = "async")]
+use embassy_rp::gpio::OutputOpenDrain;
+#[cfg(feature = "async")]
+use embedded_hal_async::delay::DelayNs;
 
 pub mod dht11 {
     use super::*;
@@ -93,8 +97,8 @@ pub mod dht11 {
     }
 
     #[cfg(not(feature = "async"))]
-    pub fn read<E>(
-        delay: &mut impl Delay,
+    pub fn read<E, D: DelayNs>(
+        delay: &mut D,
         pin: &mut impl InputOutputPin<E>,
     ) -> Result<Reading, read::DhtError<E>> {
         pin.set_low()?;
@@ -103,13 +107,16 @@ pub mod dht11 {
     }
 
     #[cfg(feature = "async")]
-    pub async fn read<E>(
-        delay: &mut (impl Delay + DelayUs),
-        pin: &mut impl InputOutputPin<E>,
-    ) -> Result<Reading, read::DhtError<E>> {
-        pin.set_low()?;
-        DelayUs::delay_ms(delay, 18).await;
-        read::read_raw(delay, pin).map(raw_to_reading)
+    pub async fn read<'a, D: DelayNs>(
+        delay: &mut D,
+        pin: &mut OutputOpenDrain<'a, AnyPin>,
+    ) -> Result<Reading, read::DhtError<()>> {
+        pin.set_low();
+        DelayNs::delay_ms(delay, 18).await;
+        read::read_raw(delay, pin)
+            .await
+            .map(raw_to_reading)
+            .map_err(|_| read::DhtError::ChecksumMismatch)
     }
 
     fn raw_to_reading(bytes: [u8; 4]) -> Reading {
@@ -165,12 +172,12 @@ pub mod dht22 {
 
     #[cfg(feature = "async")]
     pub async fn read<E>(
-        delay: &mut (impl Delay + DelayUs),
+        delay: &mut impl DelayNs,
         pin: &mut impl InputOutputPin<E>,
     ) -> Result<Reading, read::DhtError<E>> {
         pin.set_low()?;
-        DelayUs::delay_ms(delay, 1).await;
-        read::read_raw(delay, pin).map(raw_to_reading)
+        DelayNs::delay_ms(delay, 1).await;
+        read::read_raw(delay, pin).await.map(raw_to_reading)
     }
 
     fn raw_to_reading(bytes: [u8; 4]) -> Reading {
